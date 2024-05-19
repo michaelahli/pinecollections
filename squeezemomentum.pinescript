@@ -1,0 +1,46 @@
+//
+// @author LazyBear 
+// List of all my indicators: https://www.tradingview.com/v/4IneGo8h/
+//
+//@version=5
+indicator(shorttitle = "SMIM", title="Squeeze Momentum Indicator [Michael]", overlay=false)
+
+bblength = input(20, title="BB Length")
+mult = input(2.0,title="BB MultFactor")
+lengthKC=input(20, title="KC Length")
+multKC = input(1.5, title="KC MultFactor")
+
+useTrueRange = input.bool(true, title="Use TrueRange (KC)")
+
+// Calculate BB
+source = close
+basis = ta.sma(source, bblength)
+dev = multKC * ta.stdev(source, bblength)
+upperBB = basis + dev
+lowerBB = basis - dev
+
+// Calculate KC
+ma = ta.sma(source, lengthKC)
+truerange = useTrueRange ? ta.tr : (high - low)
+rangema = ta.sma(truerange, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+
+sqzOn  = (lowerBB > lowerKC) and (upperBB < upperKC)
+sqzOff = (lowerBB < lowerKC) and (upperBB > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+midpoint = math.avg(ta.highest(high, lengthKC), ta.lowest(low, lengthKC))
+normalized = math.avg(midpoint, ta.sma(close,lengthKC))
+
+val = ta.linreg(source - normalized, lengthKC, 0)
+
+isPositive = (val > 0)
+isHigherThanPrevious = (val > nz(val[1]))
+isLowerThanPrevious = (val < nz(val[1]))
+
+bcolor = isPositive ? (isHigherThanPrevious ? color.lime: color.green) : (isLowerThanPrevious? color.red: color.maroon)
+scolor = noSqz ? color.blue : sqzOn ? color.black : color.gray 
+
+plot(val, color=bcolor, style=plot.style_histogram, linewidth=4)
+plot(0, color=scolor, style=plot.style_cross, linewidth=2)

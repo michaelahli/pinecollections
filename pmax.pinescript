@@ -1,0 +1,219 @@
+//@version=5
+strategy("Profit Maximizer with Money Management [Michael]", shorttitle="PMaxwMM", overlay=true, pyramiding = 100, initial_capital = 100000000.0)
+
+src                 = input(close, title="Source")
+multiplier          = input.float(title="Multiplier", step=0.1, defval=3.0)
+length              = input.int(10, "Length", minval=1)
+matype              = input.string(title="Moving Average Type", defval="EMA", options=["SMA", "EMA", "WMA", "TMA", "VAR", "WWMA", "ZLEMA", "TSF"])
+RiskPercentage      = input.float(defval = 20, title = "Risk Percentage (%)", minval = 0)
+ATRStandard         = input.bool(title="Build-In ATR", defval=true)
+ScaleIn             = input.bool(defval = true, title="Scale In Pyramid")
+
+Start               = input.time(defval = timestamp("01 Jan 2020 00:00 +0000"), title = "Start Time")
+End                 = input.time(defval = timestamp("01 Jan 2045 00:00 +0000"), title = "End Time")
+StartMin            = input.bool(defval = false, title="Spend Minimum")
+Pyramiding          = input.int(defval = 5, title = "Pyramiding Count", minval = 1)
+MinQty              = input.float(defval = 100, title = "Minimum Purchase Quantity", minval = 1)
+MinProfit           = input.float(defval = 1, title="Minimum Profit Percentage (%)")
+ExpectedProfit      = input.float(defval = 12, title="Expected YoY Profit Percentage (%)")
+
+showsupport         = input.bool(title="Show Moving Average", defval=true)
+showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
+highlighting        = input.bool(title="Show Highlighter", defval=false)
+
+// Strategy Logic
+
+atr = ATRStandard ? ta.atr(length) : ta.sma(ta.tr, length)
+
+calculateVAR(src,length)=>
+    valpha=2/(length+1)
+    vud1=src>src[1] ? src-src[1] : 0
+    vdd1=src<src[1] ? src[1]-src : 0
+    vUD=math.sum(vud1,9)
+    vDD=math.sum(vdd1,9)
+    vCMO=nz((vUD-vDD)/(vUD+vDD))
+    VAR=0.0
+    VAR:=nz(valpha*math.abs(vCMO)*src)+(1-valpha*math.abs(vCMO))*nz(VAR[1])
+
+calculateWWMA(src,length)=>
+    wwalpha = 1/ length
+    WWMA = 0.0
+    WWMA := wwalpha*src + (1-wwalpha)*nz(WWMA[1])
+
+calculateZLEMA(src,length)=>
+    zxLag = length/2==math.round(length/2) ? length/2 : (length - 1) / 2
+    zxEMAData = (src + (src - src[zxLag]))
+    ZLEMA = ta.ema(zxEMAData, length)
+
+calculateTSF(src,length)=>
+    lrc = ta.linreg(src, length, 0)
+    lrc1 = ta.linreg(src,length,1)
+    lrs = (lrc-lrc1)
+    TSF = ta.linreg(src, length, 0)+lrs
+
+calculateMovingAverage(src, length) =>
+    float ma = switch matype
+        "SMA"   => ta.sma(src, length)
+        "EMA"   => ta.ema(src, length)
+        "WMA"   => ta.wma(src, length)
+        "TMA"   => ta.sma(ta.sma(src, math.ceil(length / 2)), math.floor(length / 2) + 1)
+        "VAR"   => calculateVAR(src,length)
+        "WWMA"  => calculateWWMA(src,length)
+        "ZLEMA" => calculateZLEMA(src,length)
+        "TSF"   => calculateTSF(src,length)
+        =>
+            float(0)
+    ma
+
+calculatedMA=calculateMovingAverage(src, length)
+calculateProfitMaximizer(src,length)=>
+    longStop = calculatedMA - multiplier*atr
+    longStopPrev = nz(longStop[1], longStop)
+    longStop := calculatedMA > longStopPrev ? math.max(longStop, longStopPrev) : longStop
+    shortStop = calculatedMA + multiplier*atr
+    shortStopPrev = nz(shortStop[1], shortStop)
+    shortStop := calculatedMA < shortStopPrev ? math.min(shortStop, shortStopPrev) : shortStop
+    uptrend = true
+    uptrend := nz(uptrend[1], uptrend)
+    uptrend := uptrend == false and calculatedMA > shortStopPrev ? true : uptrend == true and calculatedMA < longStopPrev ? false : uptrend
+    ProfitMaximizer = uptrend == true ? longStop: shortStop
+
+pmax=calculateProfitMaximizer(src,length)
+
+// Plot Data
+
+plot(showsupport ? calculatedMA : na, color=#0585E1, linewidth=2, title="Moving Avg Line")
+buySignalk = ta.crossover(calculatedMA, pmax)
+plotshape(buySignalk and showsignalsk ? pmax*0.995 : na, title="Buy", text="Buy", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+sellSignallk = ta.crossunder(calculatedMA, pmax)
+plotshape(sellSignallk and showsignalsk ? pmax*1.005 : na, title="Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+pALL=plot(pmax, color=color.red, linewidth=2, title="Profit Maximizer")
+mPlot = plot(ohlc4, title="", style=plot.style_circles, display=display.none)
+longFillColor = highlighting ? (calculatedMA>pmax ? color.green : na) : na
+shortFillColor = highlighting ? (calculatedMA<pmax ? color.red : na) : na
+
+fill(mPlot, pALL, title="UpTrend Highligter", color=longFillColor)
+fill(mPlot, pALL, title="DownTrend Highligter", color=shortFillColor)
+
+// Backtesting Strategy
+
+varip prevequity = strategy.equity
+varip prevbuy = 0.0
+varip maxopen = 0.0
+varip scalecount = 0
+varip maxscale = 1
+varip profitequity = 0.0
+varip listpnl = array.new_float()
+
+riskmultiplier = 1 - (float(RiskPercentage)/100)
+withinRange = time >= Start and time <= End
+haveEquity = strategy.equity > 0
+isCheap = prevbuy == 0 or close < prevbuy * riskmultiplier
+buyCondition = buySignalk and withinRange and haveEquity and isCheap
+isProfitable = strategy.equity > prevequity
+sellCondition = sellSignallk and withinRange and haveEquity and isProfitable
+isScaledIn = ScaleIn == true
+
+mmdivider = float(Pyramiding*(Pyramiding+1) / 2)
+if isScaledIn
+    mmdivider := float(math.pow(2, Pyramiding) - 1)
+
+countScale(avgprice, cnt, max) =>
+    if avgprice == 0
+        [1, max]
+    else
+        ncnt = cnt + 1
+        nmax = max
+        if max < ncnt
+            nmax := ncnt
+        [ncnt, nmax]
+
+calculateTradeAmt() =>
+    qty = math.floor((strategy.initial_capital/mmdivider)/(close*MinQty))*MinQty
+    if StartMin
+        qty := MinQty
+    if strategy.position_size != 0 and isScaledIn
+        qty += strategy.position_size
+    qty
+
+if buyCondition
+    tradeamt = calculateTradeAmt()
+    prevbuy := close
+    buyamount = tradeamt*close
+    opensize = nz(strategy.position_size*strategy.position_avg_price)+buyamount
+    avgprice = math.avg(nz(strategy.position_avg_price), close)
+    pnl = 100-(avgprice*100/close)
+
+    [cnt, max] = countScale(nz(strategy.position_avg_price), scalecount, maxscale)
+    scalecount := cnt
+    maxscale := max
+
+    log.info("\n BUY {0} @ {1} \n current equity: {2} \n open pnl: {3} % \n owned total {4}", tradeamt, buyamount, strategy.equity, pnl, opensize)
+    strategy.entry("amount"+str.tostring(tradeamt), strategy.long, qty = tradeamt)
+
+if sellCondition
+    pnl = 100-(strategy.position_avg_price*100/close)
+    if pnl > MinProfit
+        opensize = strategy.position_size*strategy.position_avg_price
+        if opensize > maxopen
+            maxopen := opensize
+        log.info("\n SELL pnl: {0} % \n current equity: {1}", pnl, strategy.equity)
+        strategy.close_all()
+        prevequity := strategy.equity
+        prevbuy := 0.0
+        profitequity := prevequity - strategy.initial_capital
+        array.push(listpnl, pnl)
+
+calculateTimeDiff(start, end) =>
+    actualend = end
+    if actualend - timenow > 0
+        actualend := timenow
+    weeksBetween = (actualend - start) / (1000*60*60*24*7)
+    daysBetween = (weeksBetween - math.floor(weeksBetween)) * 7
+    hoursBetween = (daysBetween - math.floor(daysBetween)) * 24
+    minutesBetwenn = (hoursBetween - math.floor(hoursBetween)) * 60
+    [math.floor(weeksBetween), math.floor(daysBetween), math.floor(hoursBetween), math.floor(minutesBetwenn)]
+
+// Plot Stat
+
+showStat() =>
+    var tbl = table.new(position.top_right, 4, 5, border_color = color.black, border_width = 1)
+    table.cell(tbl, 0, 0, "Metrics",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 0, "Expected", bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 2, 0, "Actual", bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 3, 0, "Status", bgcolor = color.gray, text_color = color.white, width = 8, height = 8)
+    
+    [weeks, days, hours, minutes] = calculateTimeDiff(Start, End)
+    weeklyExpectedProfit = ExpectedProfit / 52
+    expectedProfit = weeklyExpectedProfit*weeks/100.0 * maxopen
+    netexpected = str.replace(str.format("{0,number,currency}", expectedProfit), "$",  "", 0)
+    net = str.replace(str.format("{0,number,currency}", profitequity), "$",  "", 0)
+    profitableStrategy = profitequity > expectedProfit 
+    table.cell(tbl, 0, 1, "Net. Profit", bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 1, netexpected, bgcolor = color.white, width = 15, height = 8)
+    table.cell(tbl, 2, 1, net, bgcolor = color.white, width = 15, height = 8)
+    table.cell(tbl, 3, 1, str.tostring(profitequity/expectedProfit, '#.##')+"x", bgcolor = profitableStrategy ? color.green : color.red, width = 8, height = 8)
+
+    capitalEffective = strategy.initial_capital > maxopen
+    capital = str.replace(str.format("{0,number,currency}", strategy.initial_capital), "$",  "", 0)
+    usedcapital = str.replace(str.format("{0,number,currency}", maxopen), "$",  "", 0)
+    table.cell(tbl, 0, 2, "Capital",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 2, capital, bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 2, 2, usedcapital, bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 3, 2, str.tostring(100-((strategy.initial_capital-maxopen)*100/strategy.initial_capital), '#.##')+"%", bgcolor = capitalEffective ? color.green : color.red, width = 8, height = 8)
+
+    buyCountEffective = Pyramiding >= maxscale
+    table.cell(tbl, 0, 3, "Buy Count",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 3, str.tostring(Pyramiding), bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 2, 3, str.tostring(maxscale), bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 3, 3, str.tostring((1-(Pyramiding-maxscale)/Pyramiding)*100, '#.##')+"%", bgcolor = buyCountEffective ? color.green : color.red, width = 8, height = 8)
+
+    avgprofit = array.avg(listpnl)
+    avgProfitableStrategy = avgprofit > MinProfit
+    table.cell(tbl, 0, 4, "Average Profit",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 4, str.tostring(MinProfit)+"%", bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 2, 4, str.tostring(avgprofit, '#.##')+"%", bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 3, 4, str.tostring((avgprofit/MinProfit), '#.##')+"x", bgcolor = avgProfitableStrategy ? color.green : color.red, width = 8, height = 8)
+
+showStat()

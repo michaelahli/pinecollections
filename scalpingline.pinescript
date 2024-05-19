@@ -1,0 +1,56 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © KivancOzbilgic
+
+//@version=5
+strategy("Scalping Line", overlay=false, initial_capital = 100000000.0)
+
+src = input(close, title="Source")
+percent = input.float(1.0,"Percent", step=0.1, minval=0)
+mainperiod = input.int(100,"Main Period")
+signalperiod = input.int(7,"Signal Period")
+MinQty              = input.float(defval = 100, title = "Minimum Purchase Quantity", minval = 1)
+
+MA = ta.sma(ta.sma(src, math.ceil(mainperiod / 2)), math.floor(mainperiod / 2) + 1)
+ssMA = MA>close+MA*percent/100 ? MA : MA<close-MA*percent/100 ? MA : close
+signalline = ta.sma(close,signalperiod)
+ScalpLine = signalline-ssMA
+
+k1=plot(ScalpLine,"SLI",color.maroon,2)
+k2=plot(0,"")
+
+color1= ScalpLine>=0 ? color.green : color.red
+fill(k1,k2,color=color1,transp=80)
+
+varip count = 1
+varip trades = array.new_string()
+
+buyCondition = ta.crossover(ScalpLine,0)
+sellCondition = ta.crossunder(ScalpLine,0) and array.size(trades) > 0
+
+calculateTradeAmt() =>
+    math.floor((strategy.equity)/(close*MinQty))*MinQty
+
+if buyCondition
+    tradeamt = calculateTradeAmt()
+    count += 1
+    id = "long"+str.tostring(count)
+    strategy.entry(id, strategy.long, qty = tradeamt)
+    array.push(id=trades, value=id) 
+    
+    buyamount = tradeamt*close
+    opensize = nz(strategy.position_size*strategy.position_avg_price)+buyamount
+    avgprice = math.avg(nz(strategy.position_avg_price), close)
+    pnl = 100-(avgprice*100/close)
+    log.info("leftover position size {0} close {1} total {2}",strategy.position_size, strategy.position_avg_price, strategy.position_size*strategy.position_avg_price)
+
+    log.info("\n BUY {0} @ {1} \n current equity: {2} \n open pnl: {3} % \n owned total {4}", tradeamt, buyamount, strategy.equity, pnl, opensize)
+
+if sellCondition
+    id = array.get(trades, 0)
+    strategy.close_all()
+    array.remove(trades, 0)
+
+    pnl = 100-(strategy.position_avg_price*100/close)
+    opensize = nz(strategy.position_size*close)
+
+    log.info("\n SELL pnl: {0} % \n current equity: {1} \n owned total {2}", pnl, strategy.equity, opensize)

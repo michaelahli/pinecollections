@@ -1,0 +1,175 @@
+//@version=5
+//
+
+strategy(title="Scalping PullBack [Refito]", shorttitle="SCALPTOOL", overlay=true)
+
+// === INPUTS ===
+HiLoLen         = input.int(34, minval=2, title="High Low PAC channel Length")
+fastEMAlength   = input.int(89, minval=2)
+mediumEMAlength = input.int(200, minval=2)
+slowEMAlength   = input.int(600, minval=2)
+ShowFastEMA     = input.bool(true)
+ShowMediumEMA   = input.bool(true)
+ShowSlowEMA     = input.bool(false)
+ShowHHLL        = input.bool(false)
+ShowFractals    = input.bool(true)
+filterBW        = input.bool(false, title="Show Ideal Fractals Only")
+ShowBarColor    = input.bool(true, title="Show coloured Bars around PAC")
+ShowBuySell     = input.bool(true, title="Show Buy/Sell Alert Arrows")
+Lookback        = input.int(3, minval=1, title="Pullback Lookback for PAC Cross Check")
+DelayArrow      = input.bool(false, title="Show Alert Arrows Only on Closed Candles")
+Delay           = DelayArrow ? 1 : 0
+ShowTrendBGcolor= input.bool(true)
+UseHAcandles    = input.bool(true, title="Use Heikin Ashi Candles in Algo Calculations")
+//
+// === /INPUTS ===
+
+// === BASE FUNCTIONS ===
+
+haClose = UseHAcandles ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, close) : close
+haOpen  = UseHAcandles ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, open) : open
+haHigh  = UseHAcandles ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, high) : high
+haLow   = UseHAcandles ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, low) : low
+
+
+//  ||---   Fractal Recognition Functions:  ---------------------------------------------------------------||
+isRegularFractal(mode) =>
+    ret = mode == 1 ? high[4] < high[3] and high[3] < high[2] and high[2] > high[1] and 
+       high[1] > high[0] : mode == -1 ? 
+       low[4] > low[3] and low[3] > low[2] and low[2] < low[1] and low[1] < low[0] : 
+       false
+    ret
+
+isBWFractal(mode) =>
+    ret = mode == 1 ? high[4] < high[2] and high[3] <= high[2] and high[2] >= high[1] and 
+       high[2] > high[0] : mode == -1 ? 
+       low[4] > low[2] and low[3] >= low[2] and low[2] <= low[1] and low[2] < low[0] : 
+       false
+    ret
+//  ||-----------------------------------------------------------------------------------------------------||
+
+//
+// === /BASE FUNCTIONS ===
+
+// === SERIES SETUP ===
+//
+
+//  ||---   Setup Moving Averages and PAC channel:
+//  ||-----------------------------------------------------------------------------------------------------||
+fastEMA     = ta.ema(haClose, fastEMAlength)
+mediumEMA   = ta.ema(haClose, mediumEMAlength)
+slowEMA     = ta.ema(haClose, slowEMAlength)
+pacC        = ta.ema(haClose, HiLoLen)
+pacL        = ta.ema(haLow, HiLoLen)
+pacU        = ta.ema(haHigh, HiLoLen)
+TrendDirection = fastEMA > mediumEMA and pacL > mediumEMA ? 1 : 
+   fastEMA < mediumEMA and pacU < mediumEMA ? -1 : 0
+
+//  ||---   Fractal Recognition:
+//  ||-----------------------------------------------------------------------------------------------------||
+filteredtopf = filterBW ? isRegularFractal(1) : isBWFractal(1)
+filteredbotf = filterBW ? isRegularFractal(-1) : isBWFractal(-1)
+//  ||-----------------------------------------------------------------------------------------------------||
+//  ||---   Higher Highs, Lower Highs, Higher Lows, Lower Lows  -------------------------------------------||
+valuewhen_H0 = ta.valuewhen(filteredtopf == true, high[2], 0)
+valuewhen_H1 = ta.valuewhen(filteredtopf == true, high[2], 1)
+valuewhen_H2 = ta.valuewhen(filteredtopf == true, high[2], 2)
+//
+higherhigh = filteredtopf == false ? false : 
+   valuewhen_H1 < valuewhen_H0 and valuewhen_H2 < valuewhen_H0
+lowerhigh = filteredtopf == false ? false : 
+   valuewhen_H1 > valuewhen_H0 and valuewhen_H2 > valuewhen_H0
+valuewhen_L0 = ta.valuewhen(filteredbotf == true, low[2], 0)
+valuewhen_L1 = ta.valuewhen(filteredbotf == true, low[2], 1)
+valuewhen_L2 = ta.valuewhen(filteredbotf == true, low[2], 2)
+//
+higherlow = filteredbotf == false ? false : 
+   valuewhen_L1 < valuewhen_L0 and valuewhen_L2 < valuewhen_L0
+lowerlow = filteredbotf == false ? false : 
+   valuewhen_L1 > valuewhen_L0 and valuewhen_L2 > valuewhen_L0
+
+//
+// === /SERIES ===
+
+//
+// === PLOTTING ===
+// 
+// Plot the Price Action Channel (PAC) base on EMA high,low and close
+L = plot(pacL, color=color.gray, linewidth=1, title="High PAC EMA", transp=50)
+U = plot(pacU, color=color.gray, linewidth=1, title="Low PAC EMA", transp=50)
+C = plot(pacC, color=color.red, linewidth=2, title="Close PAC EMA", transp=0)
+fill(L, U, color=color.gray, transp=90, title="Fill HiLo PAC")
+
+// Colour bars according to the close position relative to the PAC selected.
+BARcolor = haClose > pacU ? color.blue : haClose < pacL ? color.red : color.gray
+barcolor(ShowBarColor ? BARcolor : na, title="Bar Colours")
+//
+BGcolor = TrendDirection == 1 ? color.green : 
+   TrendDirection == -1 ? color.red : color.yellow
+bgcolor(ShowTrendBGcolor ? BGcolor : na, transp=90, title="Trend BG Color")
+
+// Draw the EMA ribbon
+plot(ShowFastEMA ? fastEMA : na, color=color.green, linewidth=2, transp=20, title="fastEMA")
+plot(ShowMediumEMA ? mediumEMA : na, color=color.blue, linewidth=3, transp=20, title="mediumEMA")
+plot(ShowSlowEMA ? slowEMA : na, color=color.black, linewidth=4, transp=20, title="slowEMA")
+//
+plotshape(ShowFractals ? filteredtopf : na, title='Filtered Top Fractals', style=shape.triangledown, location=location.abovebar, color=color.red)
+plotshape(ShowFractals ? filteredbotf : na, title='Filtered Bottom Fractals', style=shape.triangleup, location=location.belowbar, color=color.lime)
+//
+plotshape(ShowHHLL ? higherhigh : na, title='Higher High', style=shape.square, location=location.abovebar, color=color.maroon, text="[HH]", offset=-2)
+plotshape(ShowHHLL ? lowerhigh : na, title='Lower High', style=shape.square, location=location.abovebar, color=color.maroon, text="[LH]", offset=-2)
+plotshape(ShowHHLL ? higherlow : na, title='High Low', style=shape.square, location=location.belowbar, color=color.green, text="[HL]", offset=-2)
+plotshape(ShowHHLL ? lowerlow : na, title='Lower Low', style=shape.square, location=location.belowbar, color=color.green, text="[LL]", offset=-2)
+//
+// === /PLOTTING ===
+
+
+// === ALERTING ===
+//
+
+// Initialise Trading state.
+TradeDirection = 0
+TradeDirection := nz(TradeDirection[1])
+//
+pacExitU = haOpen < pacU and haClose > pacU and ta.barssince(haClose<pacC)<=Lookback
+pacExitL = haOpen > pacL and haClose < pacL and ta.barssince(haClose>pacC)<=Lookback
+plotshape(ta.barssince(haClose<pacC),color=na,location=location.bottom,title="barssince(haClose<pacC)")
+plotshape(ta.barssince(close>pacC),color=na,location=location.bottom,title="barssince(haClose>pacC)")
+//
+Buy = TrendDirection == 1 and pacExitU
+Sell = TrendDirection == -1 and pacExitL
+//
+// Keep Current trading state until Pullback occurs or New Recovery.
+TradeDirection := TradeDirection == 1 and haClose<pacC ? 0 : 
+   TradeDirection == -1 and haClose>pacC ? 0 : 
+   TradeDirection == 0 and Buy ? 1 : 
+   TradeDirection == 0 and Sell ? -1 : TradeDirection
+
+// Show buy/sell arrows
+showarrow = ShowBuySell and nz(TradeDirection[1+Delay]) == 0 and TradeDirection[Delay] != 0 
+plotarrow(showarrow ? TradeDirection[Delay] : na, offset=-Delay, 
+          colorup=color.green, colordown=color.maroon, transp=20, minheight=20, maxheight=50, title="Buy/Sell Arrow")
+
+varip count = 1
+varip trades = array.new_string()
+
+if ShowFractals and filteredbotf
+    count += 1
+    id = "long"+str.tostring(count)
+    strategy.entry(id, strategy.long)
+    array.push(id=trades, value=id) 
+if ShowFractals and filteredtopf and array.size(trades) > 0
+    id = array.get(trades, 0)
+    strategy.close(id)
+    array.remove(trades, 0)
+
+//
+// Create alerts for TradingView Alarm subsystem.
+Long = nz(TradeDirection[1]) == 0 and TradeDirection == 1
+Short = nz(TradeDirection[1]) == 0 and TradeDirection == -1
+alertcondition(Long, title="Buy Condition", message="BUY")
+alertcondition(Short, title="Sell Condition", message="SELL")
+//
+// === /ALERTING ===
+
+// === eof.
