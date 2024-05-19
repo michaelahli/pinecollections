@@ -299,6 +299,28 @@ _startOfBullishLeg = startOfBullishLeg(currentLeg)
 calculateTradeAmt() =>
     math.floor((strategy.equity)/(close))
 
+varip lockTakeProfit = 0.0
+varip lockStopLoss = 0.0
+
+bullCondition = barstate.isconfirmed and _startOfNewLeg and _startOfBullishLeg
+bearCondition = barstate.isconfirmed and _startOfNewLeg and _startOfBearishLeg
+takeProfitCondition = not na(strategy.position_avg_price) and close > strategy.position_avg_price + lockTakeProfit
+stopLossCondition = not na(strategy.position_avg_price) and close < strategy.position_avg_price - lockStopLoss
+buyCondition = bullCondition and lockTakeProfit == 0 and lockStopLoss == 0
+sellCondition = takeProfitCondition or stopLossCondition
+
+if buyCondition
+    tradeamt = calculateTradeAmt()
+    log.info("BUY trade amt {0} \n total {1} \n equity {2} \n takeProfit {3} \n stopLoss {4} \n close {5}", tradeamt, tradeamt*close, strategy.equity, close + takeProfit, close - stopLoss, close)
+    strategy.entry("buy",  strategy.long, qty = tradeamt)
+    lockTakeProfit := takeProfit
+    lockStopLoss := stopLoss
+
+if sellCondition
+    log.info("SELL pnl {0} \n  takeProfit {1} \n stopLoss {2} \n close {3}",strategy.openprofit_percent, strategy.position_avg_price+ lockTakeProfit, strategy.position_avg_price-lockStopLoss, close)
+    strategy.close_all("sell")
+    lockTakeProfit := 0
+    lockStopLoss := 0
 
 // we execute the logic only once per bar close
 if barstate.isconfirmed
@@ -308,7 +330,6 @@ if barstate.isconfirmed
 
         // we identify the new area as a bearish one so we create and/or update areas upon user selection mode
         if _startOfBearishLeg
-            strategy.close_all()
             switch areaSelectionModeInput
                 BULLISH_AREA => updateLastArea(legHigh)
                 BEARISH_AREA => createNewArea(legHigh, areaColor = bearAreaColorInput)
@@ -318,9 +339,6 @@ if barstate.isconfirmed
 
         // we identify the new area as a bullish one so we create and/or update areas upon user selection mode
         if _startOfBullishLeg
-            tradeamt = calculateTradeAmt()
-            log.info("trade amt {0} \n total {1} \n equity {2}", tradeamt, tradeamt*close, strategy.equity)
-            strategy.entry("long",  strategy.long, qty = tradeamt)
             switch areaSelectionModeInput
                 BULLISH_AREA => createNewArea(areaLow = legLow, areaColor = bullAreaColorInput)
                 BEARISH_AREA => updateLastArea(areaLow = legLow)
