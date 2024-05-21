@@ -11,11 +11,13 @@ ScaleIn             = input.bool(defval = true, title="Scale In Pyramid")
 
 Start               = input.time(defval = timestamp("01 Jan 2020 00:00 +0000"), title = "Start Time")
 End                 = input.time(defval = timestamp("01 Jan 2045 00:00 +0000"), title = "End Time")
+AboveMA             = input.int(defval = 0, title = "Only Trade Above MA", minval = 0)
 StartMin            = input.bool(defval = false, title="Spend Minimum")
 Pyramiding          = input.int(defval = 5, title = "Pyramiding Count", minval = 1)
 MinQty              = input.float(defval = 100, title = "Minimum Purchase Quantity", minval = 1)
 MinProfit           = input.float(defval = 1, title="Minimum Profit Percentage (%)")
 ExpectedProfit      = input.float(defval = 12, title="Expected YoY Profit Percentage (%)")
+RequireProfit       = input.bool(defval = true, title="Require Profit")
 
 showsupport         = input.bool(title="Show Moving Average", defval=true)
 showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
@@ -106,12 +108,18 @@ varip maxscale = 1
 varip profitequity = 0.0
 varip listpnl = array.new_float()
 
+tradeAboveMA() =>
+    if AboveMA > 0 
+        close > ta.sma(close, AboveMA)
+    else
+        true
+
 riskmultiplier = 1 - (float(RiskPercentage)/100)
 withinRange = time >= Start and time <= End
 haveEquity = strategy.equity > 0
 isCheap = prevbuy == 0 or close < prevbuy * riskmultiplier
-buyCondition = buySignalk and withinRange and haveEquity and isCheap
-isProfitable = strategy.equity > prevequity
+buyCondition = buySignalk and withinRange and haveEquity and isCheap and tradeAboveMA()
+isProfitable = strategy.equity > prevequity or not RequireProfit
 sellCondition = sellSignallk and withinRange and haveEquity and isProfitable
 isScaledIn = ScaleIn == true
 
@@ -154,7 +162,7 @@ if buyCondition
 
 if sellCondition
     pnl = 100-(strategy.position_avg_price*100/close)
-    if pnl > MinProfit
+    if pnl > MinProfit or not RequireProfit
         opensize = strategy.position_size*strategy.position_avg_price
         if opensize > maxopen
             maxopen := opensize

@@ -31,6 +31,7 @@ takeProfitMultiplierTooltip     = 'The size of the take profit - this threshold 
 stopLossMultiplierTooltip       = 'The size of the stop-loss: this threshold is multiplied by a measure of volatility (the average true range over the last 200 bars).'
 showAreasTooltip                = 'Activate/deactivate areas, select colours for bullish and bearish areas.'
 overlappingTradesTooltip        = 'Activate/deactivate overlapping trades.'
+tradeAboveMA                    = 'only trade above moving average (0 means trade below ma also)'
 
 
 pivotLengthInput                = input.int(    20,                 'Pivot Length',     group = SWINGS_GROUP,   tooltip = pivotLengthTooltip,               minval = 1)	
@@ -39,6 +40,7 @@ areaThresholdMultiplierInput    = input.float(  4.0,                'Threshold',
 
 maximumDistanceFromAreaInput    = input.int(    200,                'Maximum distance', group = TRADES_GROUP,   tooltip = maximumDistanceFromAreaTooltip)
 minimumDistanceFromAreaInput    = input.int(    10,                 'Minimum distance', group = TRADES_GROUP,   tooltip = minimumDistanceFromAreaTooltip)
+aboveMA                         = input.int(   0,                   'Only Trade Above MA', group = STYLE_GROUP, tooltip = tradeAboveMA, minval = 0)
 takeProfitMultiplierInput       = input.float(  8.0,                'Take profit',      group = TRADES_GROUP,   tooltip = takeProfitMultiplierTooltip)
 stopLossMultiplierInput         = input.float(  4.0,                'Stop loss',        group = TRADES_GROUP,   tooltip = stopLossMultiplierTooltip)
 
@@ -58,7 +60,6 @@ stopLossColorInput              = input.color(  color.new(RED,75),  '',         
 
 overlappingTradesInput          = input.bool(   false,              'Overlap trades',   group = STYLE_GROUP,    tooltip = overlappingTradesTooltip)
 
-aboveMA200                      = input.bool(   false,              'Above MA 200',   group = STYLE_GROUP,    tooltip = "only trade above moving average 200")
 
 //---------------------------------------------------------------------------------------------------------------------}
 //DATA STRUCTURES & VARIABLES
@@ -301,10 +302,10 @@ _startOfBullishLeg = startOfBullishLeg(currentLeg)
 calculateTradeAmt() =>
     math.floor((strategy.equity)/(close))
 
-madependencies() =>
-    if aboveMA200
-        ta.sma(close, 200) < close
-    else 
+tradeAboveMA() =>
+    if aboveMA > 0 
+        close > ta.sma(close, aboveMA)
+    else
         true
 
 varip lockTakeProfit = 0.0
@@ -314,7 +315,7 @@ bullCondition = barstate.isconfirmed and _startOfNewLeg and _startOfBullishLeg
 bearCondition = barstate.isconfirmed and _startOfNewLeg and _startOfBearishLeg
 takeProfitCondition = not na(strategy.position_avg_price) and close > strategy.position_avg_price + lockTakeProfit
 stopLossCondition = not na(strategy.position_avg_price) and close < strategy.position_avg_price - lockStopLoss
-buyCondition = bullCondition and lockTakeProfit == 0 and lockStopLoss == 0 and madependencies()
+buyCondition = bullCondition and lockTakeProfit == 0 and lockStopLoss == 0
 sellCondition = takeProfitCondition or stopLossCondition
 
 if buyCondition
@@ -329,6 +330,9 @@ if buyCondition
     lockStopLoss := stopLoss
 
 if sellCondition
+    tpPosition = strategy.position_avg_price + lockTakeProfit
+    slPosition = strategy.position_avg_price - lockStopLoss
+    log.info("SELL pnl {0} \n  takeProfit {1} \n stopLoss {2} \n close {3}",strategy.openprofit_percent, tpPosition, slPosition, close)
     tpPosition = strategy.position_avg_price + lockTakeProfit
     slPosition = strategy.position_avg_price - lockStopLoss
     log.info("SELL pnl {0} \n  takeProfit {1} \n stopLoss {2} \n close {3}",strategy.openprofit_percent, tpPosition, slPosition, close)
