@@ -58,6 +58,8 @@ stopLossColorInput              = input.color(  color.new(RED,75),  '',         
 
 overlappingTradesInput          = input.bool(   false,              'Overlap trades',   group = STYLE_GROUP,    tooltip = overlappingTradesTooltip)
 
+aboveMA200                      = input.bool(   false,              'Above MA 200',   group = STYLE_GROUP,    tooltip = "only trade above moving average 200")
+
 //---------------------------------------------------------------------------------------------------------------------}
 //DATA STRUCTURES & VARIABLES
 //---------------------------------------------------------------------------------------------------------------------{
@@ -299,6 +301,12 @@ _startOfBullishLeg = startOfBullishLeg(currentLeg)
 calculateTradeAmt() =>
     math.floor((strategy.equity)/(close))
 
+madependencies() =>
+    if aboveMA200
+        ta.sma(close, 200) < close
+    else 
+        true
+
 varip lockTakeProfit = 0.0
 varip lockStopLoss = 0.0
 
@@ -306,18 +314,24 @@ bullCondition = barstate.isconfirmed and _startOfNewLeg and _startOfBullishLeg
 bearCondition = barstate.isconfirmed and _startOfNewLeg and _startOfBearishLeg
 takeProfitCondition = not na(strategy.position_avg_price) and close > strategy.position_avg_price + lockTakeProfit
 stopLossCondition = not na(strategy.position_avg_price) and close < strategy.position_avg_price - lockStopLoss
-buyCondition = bullCondition and lockTakeProfit == 0 and lockStopLoss == 0
+buyCondition = bullCondition and lockTakeProfit == 0 and lockStopLoss == 0 and madependencies()
 sellCondition = takeProfitCondition or stopLossCondition
 
 if buyCondition
+    tpPosition = math.abs(close + takeProfit)
+    tpPositionPercentage = ((tpPosition / close)-1)*100
+    slPosition = math.abs(close - stopLoss)
+    slPositionPercentage = (1-(slPosition / close))*100 
     tradeamt = calculateTradeAmt()
-    log.info("BUY trade amt {0} \n total {1} \n equity {2} \n takeProfit {3} \n stopLoss {4} \n close {5}", tradeamt, tradeamt*close, strategy.equity, close + takeProfit, close - stopLoss, close)
+    log.info("BUY trade amt {0} \n total {1} \n equity {2} \n takeProfit {3} ({4}%) \n stopLoss {5} ({6}%}) \n close {7}", tradeamt, tradeamt*close, strategy.equity, tpPosition, tpPositionPercentage, slPosition, slPositionPercentage, close)
     strategy.entry("buy",  strategy.long, qty = tradeamt)
     lockTakeProfit := takeProfit
     lockStopLoss := stopLoss
 
 if sellCondition
-    log.info("SELL pnl {0} \n  takeProfit {1} \n stopLoss {2} \n close {3}",strategy.openprofit_percent, strategy.position_avg_price+ lockTakeProfit, strategy.position_avg_price-lockStopLoss, close)
+    tpPosition = strategy.position_avg_price + lockTakeProfit
+    slPosition = strategy.position_avg_price - lockStopLoss
+    log.info("SELL pnl {0} \n  takeProfit {1} \n stopLoss {2} \n close {3}",strategy.openprofit_percent, tpPosition, slPosition, close)
     strategy.close_all("sell")
     lockTakeProfit := 0
     lockStopLoss := 0
