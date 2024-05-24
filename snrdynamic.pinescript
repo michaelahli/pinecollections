@@ -2,19 +2,27 @@
 // © LonesomeTheBlue
 
 //@version=5
-indicator('Support Resistance - Dynamic [Michael]', 'SRD', overlay=true)
+strategy('Support Resistance - Dynamic [Michael]', 'SRD', overlay=true, pyramiding = 100, initial_capital = 10000000)
 prd = input.int(defval=10, title='Pivot Period', minval=4, maxval=30, group='Setup')
 ppsrc = input.string(defval='High/Low', title='Source', options=['High/Low', 'Close/Open'], group='Setup')
 maxnumpp = input.int(defval=20, title=' Maximum Number of Pivot', minval=5, maxval=100, group='Setup')
 ChannelW = input.int(defval=10, title='Maximum Channel Width %', minval=1, group='Setup')
 maxnumsr = input.int(defval=5, title=' Maximum Number of S/R', minval=1, maxval=10, group='Setup')
 min_strength = input.int(defval=2, title=' Minimum Strength', minval=1, maxval=10, group='Setup')
+riskPercentage      = input.float(defval = 20, title = "Risk Percentage (%)", minval = 0)
 labelloc = input.int(defval=20, title='Label Location', group='Colors', tooltip='Positive numbers reference future bars, negative numbers reference histical bars')
 linestyle = input.string(defval='Dashed', title='Line Style', options=['Solid', 'Dotted', 'Dashed'], group='Colors')
 linewidth = input.int(defval=2, title='Line Width', minval=1, maxval=4, group='Colors')
 resistancecolor = input.color(defval=color.red, title='Resistance Color', group='Colors')
 supportcolor = input.color(defval=color.lime, title='Support Color', group='Colors')
 showpp = input(false, title='Show Point Points')
+minProfit           = input.float(defval = 2, title="Minimum Profit Percentage (%)")
+requireProfit       = input.bool(defval = true, title="Require Profit")
+pyramiding          = input.int(defval = 1, title = "Pyramiding Count", minval = 1)
+scaleIn             = input.bool(defval = false, title="Scale In Pyramid")
+startMin            = input.bool(defval = false, title="Spend Minimum")
+minQty              = input.float(defval = 100, title = "Minimum Purchase Quantity", minval = 1)
+aboveMA             = input.int(200,                   'Only Trade Above MA', minval = 0)
 
 float src1 = ppsrc == 'High/Low' ? high : math.max(close, open)
 float src2 = ppsrc == 'High/Low' ? low : math.min(close, open)
@@ -127,7 +135,6 @@ if phcond or plcond
         float mid = math.round_to_mintick((array.get(sr_up_level, x) + array.get(sr_dn_level, x)) / 2)
         rate = 100 * (mid - close) / close
         array.set(sr_labels, x + 1, label.new(x=bar_index + labelloc, y=mid, text=str.tostring(mid) + '(' + str.tostring(rate, '#.##') + '%)', color=mid >= close ? color.red : color.lime, textcolor=mid >= close ? color.white : color.black, style=mid >= close ? label.style_label_down : label.style_label_up))
-
         array.set(sr_lines, x + 1, line.new(x1=bar_index, y1=mid, x2=bar_index - 1, y2=mid, extend=extend.both, color=mid >= close ? resistancecolor : supportcolor, style=Lstyle, width=linewidth))
 
 f_crossed_over() =>
@@ -141,13 +148,63 @@ f_crossed_over() =>
 
 f_crossed_under() =>
     ret = false
-    for x = 0 to array.size(sr_up_level) > 0 ? array.size(sr_up_level) - 1 : na by 1
+    for x = 0 to array.size(sr_dn_level) > 0 ? array.size(sr_dn_level) - 1 : na by 1
         float mid = math.round_to_mintick((array.get(sr_up_level, x) + array.get(sr_dn_level, x)) / 2)
         if close[1] >= mid and close < mid
             ret := true
             ret
     ret
 
-alertcondition(f_crossed_over(), title='Resistance Broken', message='Resistance Broken')
-alertcondition(f_crossed_under(), title='Support Broken', message='Support Broken')
+isProfitable = close > strategy.position_avg_price or not requireProfit
 
+isScaledIn = scaleIn == true
+
+mmdivider = float(pyramiding*(pyramiding+1) / 2)
+if isScaledIn
+    mmdivider := float(math.pow(2, pyramiding) - 1)
+
+calculateTradeAmt() =>
+    qty = math.round_to_mintick((strategy.initial_capital/mmdivider)/(close*minQty))*minQty
+    if startMin
+        qty := minQty
+    if strategy.position_size != 0 and isScaledIn
+        qty += strategy.position_size
+    qty
+
+tradeamt = calculateTradeAmt()
+
+varip topCapital = 0.0
+varip prevPurchase = 0.0
+
+riskmultiplier = 1 - (float(riskPercentage)/100)
+sufficientdrawdown() =>
+    if strategy.position_avg_price  > 0
+        strategy.position_avg_price * riskmultiplier > close
+    else
+        true
+
+tradeAboveMA() =>
+    if aboveMA > 0 
+        close > ta.sma(close, aboveMA)
+    else
+        true
+
+sellCondition = f_crossed_over() and isProfitable and strategy.openprofit_percent > minProfit
+buyCondition = f_crossed_under() and tradeamt > 1 and sufficientdrawdown() and tradeAboveMA()
+
+if buyCondition
+    strategy.entry("buy"+str.tostring(tradeamt),  strategy.long, qty = tradeamt)
+    prevPurchase := close
+    capital = 0.0
+    prevCapital = strategy.position_avg_price * strategy.position_size
+    if na(prevCapital)
+        capital := close * tradeamt
+    else
+        capital :=  prevCapital +  close * tradeamt
+    if capital > topCapital
+        topCapital := capital
+        log.info("capital {0} size {1} avg price {2}", topCapital, strategy.position_size, strategy.position_avg_price)
+
+if sellCondition
+    strategy.close_all("sell")
+    prevPurchase := 0
