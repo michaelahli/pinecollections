@@ -22,6 +22,7 @@ RequireProfit       = input.bool(defval = true, title="Require Profit")
 showsupport         = input.bool(title="Show Moving Average", defval=true)
 showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
 highlighting        = input.bool(title="Show Highlighter", defval=false)
+showPerformance     = input.bool(title="Show Performance Table", defval=false)
 
 // Strategy Logic
 
@@ -224,4 +225,5 @@ showStat() =>
     table.cell(tbl, 2, 4, str.tostring(avgprofit, '#.##')+"%", bgcolor = color.white,   width = 15, height = 8)
     table.cell(tbl, 3, 4, str.tostring((avgprofit/MinProfit), '#.##')+"x", bgcolor = avgProfitableStrategy ? color.green : color.red, width = 8, height = 8)
 
-showStat()
+if showPerformance
+    showStat()
