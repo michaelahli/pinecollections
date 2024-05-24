@@ -1,0 +1,385 @@
+//@version=5
+strategy("Profit Maximizer with SnR [Michael]", shorttitle="PMaxwSnR", overlay=true, pyramiding = 100, initial_capital = 100000000.0)
+
+src                 = input(close, title="Source")
+multiplier          = input.float(title="Multiplier", step=0.1, defval=3.0)
+length              = input.int(10, "Length", minval=1)
+matype              = input.string(title="Moving Average Type", defval="EMA", options=["SMA", "EMA", "WMA", "TMA", "VAR", "WWMA", "ZLEMA", "TSF"])
+RiskPercentage      = input.float(defval = 20, title = "Risk Percentage (%)", minval = 0)
+ATRStandard         = input.bool(title="Build-In ATR", defval=true)
+ScaleIn             = input.bool(defval = true, title="Scale In Pyramid")
+
+Start               = input.time(defval = timestamp("01 Jan 2020 00:00 +0000"), title = "Start Time")
+End                 = input.time(defval = timestamp("01 Jan 2045 00:00 +0000"), title = "End Time")
+AboveMA             = input.int(defval = 0, title = "Only Trade Above MA", minval = 0)
+StartMin            = input.bool(defval = false, title="Spend Minimum")
+Pyramiding          = input.int(defval = 5, title = "Pyramiding Count", minval = 1)
+MinQty              = input.float(defval = 100, title = "Minimum Purchase Quantity", minval = 1)
+MinProfit           = input.float(defval = 1, title="Minimum Profit Percentage (%)")
+ExpectedProfit      = input.float(defval = 12, title="Expected YoY Profit Percentage (%)")
+RequireProfit       = input.bool(defval = true, title="Require Profit")
+
+showsupport         = input.bool(title="Show Moving Average", defval=true)
+showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
+highlighting        = input.bool(title="Show Highlighter", defval=false)
+showPerformance     = input.bool(title="Show Performance Table", defval=false)
+
+prd                 = input.int(defval=10, title='Pivot Period', minval=4, maxval=30, group='Setup')
+ppsrc               = input.string(defval='High/Low', title='Source', options=['High/Low', 'Close/Open'], group='Setup')
+maxnumpp            = input.int(defval=20, title=' Maximum Number of Pivot', minval=5, maxval=100, group='Setup')
+ChannelW            = input.int(defval=10, title='Maximum Channel Width %', minval=1, group='Setup')
+maxnumsr            = input.int(defval=5, title=' Maximum Number of S/R', minval=1, maxval=10, group='Setup')
+min_strength        = input.int(defval=2, title=' Minimum Strength', minval=1, maxval=10, group='Setup')
+riskPercentage      = input.float(defval = 20, title = "Risk Percentage (%)", minval = 0)
+labelloc            = input.int(defval=20, title='Label Location', group='Colors', tooltip='Positive numbers reference future bars, negative numbers reference histical bars')
+linestyle           = input.string(defval='Dashed', title='Line Style', options=['Solid', 'Dotted', 'Dashed'], group='Colors')
+linewidth           = input.int(defval=2, title='Line Width', minval=1, maxval=4, group='Colors')
+resistancecolor     = input.color(defval=color.red, title='Resistance Color', group='Colors')
+supportcolor        = input.color(defval=color.lime, title='Support Color', group='Colors')
+showpp              = input(false, title='Show Point Points')
+
+// Moving Average Logic
+lma = AboveMA
+if AboveMA == 0
+    lma := 1
+
+out = ta.sma(src, lma)
+plot(out, color=color.green, title="MA", linewidth=2)
+
+// SnR Dynamic Logic
+
+float src1 = ppsrc == 'High/Low' ? high : math.max(close, open)
+float src2 = ppsrc == 'High/Low' ? low : math.min(close, open)
+float ph = ta.pivothigh(src1, prd, prd)
+float pl = ta.pivotlow(src2, prd, prd)
+bool phcond = ph > 0
+bool plcond = pl > 0
+
+plotshape(phcond and showpp, text='H', style=shape.labeldown, color=na, textcolor=color.new(color.red, 0), location=location.abovebar, offset=-prd)
+plotshape(plcond and showpp, text='L', style=shape.labelup, color=na, textcolor=color.new(color.lime, 0), location=location.belowbar, offset=-prd)
+
+Lstyle = linestyle == 'Dashed' ? line.style_dashed : linestyle == 'Solid' ? line.style_solid : line.style_dotted
+
+//calculate maximum S/R channel zone width
+prdhighest = ta.highest(300)
+prdlowest = ta.lowest(300)
+cwidth = (prdhighest - prdlowest) * ChannelW / 100
+
+var pivotvals = array.new_float(0)
+
+if phcond or plcond
+    array.unshift(pivotvals, phcond ? ph : pl)
+    if array.size(pivotvals) > maxnumpp  // limit the array size
+        array.pop(pivotvals)
+
+get_sr_vals(ind) =>
+    float lo = array.get(pivotvals, ind)
+    float hi = lo
+    int numpp = 0
+    for y = 0 to array.size(pivotvals) - 1 by 1
+        float cpp = array.get(pivotvals, y)
+        float wdth = cpp <= lo ? hi - cpp : cpp - lo
+        if wdth <= cwidth  // fits the max channel width?
+            if cpp <= hi
+                lo := math.min(lo, cpp)
+            else
+                hi := math.max(hi, cpp)
+
+            numpp += 1
+            numpp
+    [hi, lo, numpp]
+
+var sr_up_level = array.new_float(0)
+var sr_dn_level = array.new_float(0)
+sr_strength = array.new_float(0)
+
+find_loc(strength) =>
+    ret = array.size(sr_strength)
+    for i = ret > 0 ? array.size(sr_strength) - 1 : na to 0 by 1
+        if strength <= array.get(sr_strength, i)
+            break
+        ret := i
+        ret
+    ret
+
+check_sr(hi, lo, strength) =>
+    ret = true
+    for i = 0 to array.size(sr_up_level) > 0 ? array.size(sr_up_level) - 1 : na by 1
+        //included?
+        if array.get(sr_up_level, i) >= lo and array.get(sr_up_level, i) <= hi or array.get(sr_dn_level, i) >= lo and array.get(sr_dn_level, i) <= hi
+            if strength >= array.get(sr_strength, i)
+                array.remove(sr_strength, i)
+                array.remove(sr_up_level, i)
+                array.remove(sr_dn_level, i)
+                ret
+            else
+                ret := false
+                ret
+            break
+    ret
+
+var sr_lines = array.new_line(11, na)
+var sr_labels = array.new_label(11, na)
+
+for x = 1 to 10 by 1
+    rate = 100 * (label.get_y(array.get(sr_labels, x)) - close) / close
+    label.set_text(array.get(sr_labels, x), text=str.tostring(label.get_y(array.get(sr_labels, x))) + '(' + str.tostring(rate, '#.##') + '%)')
+    label.set_x(array.get(sr_labels, x), x=bar_index + labelloc)
+    label.set_color(array.get(sr_labels, x), color=label.get_y(array.get(sr_labels, x)) >= close ? color.red : color.lime)
+    label.set_textcolor(array.get(sr_labels, x), textcolor=label.get_y(array.get(sr_labels, x)) >= close ? color.white : color.black)
+    label.set_style(array.get(sr_labels, x), style=label.get_y(array.get(sr_labels, x)) >= close ? label.style_label_down : label.style_label_up)
+    line.set_color(array.get(sr_lines, x), color=line.get_y1(array.get(sr_lines, x)) >= close ? resistancecolor : supportcolor)
+
+if phcond or plcond
+    //because of new calculation, remove old S/R levels
+    array.clear(sr_up_level)
+    array.clear(sr_dn_level)
+    array.clear(sr_strength)
+    //find S/R zones
+    for x = 0 to array.size(pivotvals) - 1 by 1
+        [hi, lo, strength] = get_sr_vals(x)
+        if check_sr(hi, lo, strength)
+            loc = find_loc(strength)
+            // if strength is in first maxnumsr sr then insert it to the arrays 
+            if loc < maxnumsr and strength >= min_strength
+                array.insert(sr_strength, loc, strength)
+                array.insert(sr_up_level, loc, hi)
+                array.insert(sr_dn_level, loc, lo)
+                // keep size of the arrays = 5
+                if array.size(sr_strength) > maxnumsr
+                    array.pop(sr_strength)
+                    array.pop(sr_up_level)
+                    array.pop(sr_dn_level)
+
+    for x = 1 to 10 by 1
+        line.delete(array.get(sr_lines, x))
+        label.delete(array.get(sr_labels, x))
+
+    for x = 0 to array.size(sr_up_level) > 0 ? array.size(sr_up_level) - 1 : na by 1
+        float mid = math.round_to_mintick((array.get(sr_up_level, x) + array.get(sr_dn_level, x)) / 2)
+        rate = 100 * (mid - close) / close
+        array.set(sr_labels, x + 1, label.new(x=bar_index + labelloc, y=mid, text=str.tostring(mid) + '(' + str.tostring(rate, '#.##') + '%)', color=mid >= close ? color.red : color.lime, textcolor=mid >= close ? color.white : color.black, style=mid >= close ? label.style_label_down : label.style_label_up))
+        array.set(sr_lines, x + 1, line.new(x1=bar_index, y1=mid, x2=bar_index - 1, y2=mid, extend=extend.both, color=mid >= close ? resistancecolor : supportcolor, style=Lstyle, width=linewidth))
+
+f_crossed_over() =>
+    ret = false
+    for x = 0 to array.size(sr_up_level) > 0 ? array.size(sr_up_level) - 1 : na by 1
+        float mid = math.round_to_mintick((array.get(sr_up_level, x) + array.get(sr_dn_level, x)) / 2)
+        if close[1] <= mid and close > mid
+            ret := true
+            ret
+    ret
+
+f_crossed_under() =>
+    ret = false
+    for x = 0 to array.size(sr_dn_level) > 0 ? array.size(sr_dn_level) - 1 : na by 1
+        float mid = math.round_to_mintick((array.get(sr_up_level, x) + array.get(sr_dn_level, x)) / 2)
+        if close[1] >= mid and close < mid
+            ret := true
+            ret
+    ret
+
+
+// PMax Logic
+
+atr = ATRStandard ? ta.atr(length) : ta.sma(ta.tr, length)
+
+calculateVAR(src,length)=>
+    valpha=2/(length+1)
+    vud1=src>src[1] ? src-src[1] : 0
+    vdd1=src<src[1] ? src[1]-src : 0
+    vUD=math.sum(vud1,9)
+    vDD=math.sum(vdd1,9)
+    vCMO=nz((vUD-vDD)/(vUD+vDD))
+    VAR=0.0
+    VAR:=nz(valpha*math.abs(vCMO)*src)+(1-valpha*math.abs(vCMO))*nz(VAR[1])
+
+calculateWWMA(src,length)=>
+    wwalpha = 1/ length
+    WWMA = 0.0
+    WWMA := wwalpha*src + (1-wwalpha)*nz(WWMA[1])
+
+calculateZLEMA(src,length)=>
+    zxLag = length/2==math.round(length/2) ? length/2 : (length - 1) / 2
+    zxEMAData = (src + (src - src[zxLag]))
+    ZLEMA = ta.ema(zxEMAData, length)
+
+calculateTSF(src,length)=>
+    lrc = ta.linreg(src, length, 0)
+    lrc1 = ta.linreg(src,length,1)
+    lrs = (lrc-lrc1)
+    TSF = ta.linreg(src, length, 0)+lrs
+
+calculateMovingAverage(src, length) =>
+    float ma = switch matype
+        "SMA"   => ta.sma(src, length)
+        "EMA"   => ta.ema(src, length)
+        "WMA"   => ta.wma(src, length)
+        "TMA"   => ta.sma(ta.sma(src, math.ceil(length / 2)), math.floor(length / 2) + 1)
+        "VAR"   => calculateVAR(src,length)
+        "WWMA"  => calculateWWMA(src,length)
+        "ZLEMA" => calculateZLEMA(src,length)
+        "TSF"   => calculateTSF(src,length)
+        =>
+            float(0)
+    ma
+
+calculatedMA=calculateMovingAverage(src, length)
+calculateProfitMaximizer(src,length)=>
+    longStop = calculatedMA - multiplier*atr
+    longStopPrev = nz(longStop[1], longStop)
+    longStop := calculatedMA > longStopPrev ? math.max(longStop, longStopPrev) : longStop
+    shortStop = calculatedMA + multiplier*atr
+    shortStopPrev = nz(shortStop[1], shortStop)
+    shortStop := calculatedMA < shortStopPrev ? math.min(shortStop, shortStopPrev) : shortStop
+    uptrend = true
+    uptrend := nz(uptrend[1], uptrend)
+    uptrend := uptrend == false and calculatedMA > shortStopPrev ? true : uptrend == true and calculatedMA < longStopPrev ? false : uptrend
+    ProfitMaximizer = uptrend == true ? longStop: shortStop
+
+pmax=calculateProfitMaximizer(src,length)
+
+// Plot Data
+
+plot(showsupport ? calculatedMA : na, color=#0585E1, linewidth=2, title="Moving Avg Line")
+buySignalk = ta.crossover(calculatedMA, pmax)
+plotshape(buySignalk and showsignalsk ? pmax*0.995 : na, title="Buy", text="Buy", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+sellSignallk = ta.crossunder(calculatedMA, pmax)
+plotshape(sellSignallk and showsignalsk ? pmax*1.005 : na, title="Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+pALL=plot(pmax, color=color.red, linewidth=2, title="Profit Maximizer")
+mPlot = plot(ohlc4, title="", style=plot.style_circles, display=display.none)
+longFillColor = highlighting ? (calculatedMA>pmax ? color.green : na) : na
+shortFillColor = highlighting ? (calculatedMA<pmax ? color.red : na) : na
+
+fill(mPlot, pALL, title="UpTrend Highligter", color=longFillColor)
+fill(mPlot, pALL, title="DownTrend Highligter", color=shortFillColor)
+
+// Backtesting Strategy
+
+varip prevequity = strategy.equity
+varip prevbuy = 0.0
+varip maxopen = 0.0
+varip scalecount = 0
+varip maxscale = 1
+varip profitequity = 0.0
+varip listpnl = array.new_float()
+
+tradeAboveMA() =>
+    if AboveMA > 0 
+        close > ta.sma(close, AboveMA)
+    else
+        true
+
+riskmultiplier = 1 - (float(RiskPercentage)/100)
+withinRange = time >= Start and time <= End
+haveEquity = strategy.equity > 0
+isCheap = prevbuy == 0 or close < prevbuy * riskmultiplier
+buyCondition = buySignalk and withinRange and haveEquity and isCheap and tradeAboveMA()
+isProfitable = strategy.equity > prevequity or not RequireProfit
+sellCondition = sellSignallk and withinRange and haveEquity and isProfitable
+isScaledIn = ScaleIn == true
+
+mmdivider = float(Pyramiding*(Pyramiding+1) / 2)
+if isScaledIn
+    mmdivider := float(math.pow(2, Pyramiding) - 1)
+
+countScale(avgprice, cnt, max) =>
+    if avgprice == 0
+        [1, max]
+    else
+        ncnt = cnt + 1
+        nmax = max
+        if max < ncnt
+            nmax := ncnt
+        [ncnt, nmax]
+
+calculateTradeAmt() =>
+    qty = math.floor((strategy.initial_capital/mmdivider)/(close*MinQty))*MinQty
+    if StartMin
+        qty := MinQty
+    if strategy.position_size != 0 and isScaledIn
+        qty += strategy.position_size
+    qty
+
+if buyCondition
+    tradeamt = calculateTradeAmt()
+    prevbuy := close
+    buyamount = tradeamt*close
+    opensize = nz(strategy.position_size*strategy.position_avg_price)+buyamount
+    avgprice = math.avg(nz(strategy.position_avg_price), close)
+    pnl = 100-(avgprice*100/close)
+
+    [cnt, max] = countScale(nz(strategy.position_avg_price), scalecount, maxscale)
+    scalecount := cnt
+    maxscale := max
+
+    log.info("\n BUY {0} @ {1} \n current equity: {2} \n open pnl: {3} % \n owned total {4}", tradeamt, buyamount, strategy.equity, pnl, opensize)
+    strategy.entry("amount"+str.tostring(tradeamt), strategy.long, qty = tradeamt)
+
+if sellCondition
+    pnl = 100-(strategy.position_avg_price*100/close)
+    if pnl > MinProfit or not RequireProfit
+        opensize = strategy.position_size*strategy.position_avg_price
+        if opensize > maxopen
+            maxopen := opensize
+        log.info("\n SELL pnl: {0} % \n current equity: {1}", pnl, strategy.equity)
+        strategy.close_all()
+        prevequity := strategy.equity
+        prevbuy := 0.0
+        profitequity := prevequity - strategy.initial_capital
+        array.push(listpnl, pnl)
+
+calculateTimeDiff(start, end) =>
+    actualend = end
+    if actualend - timenow > 0
+        actualend := timenow
+    weeksBetween = (actualend - start) / (1000*60*60*24*7)
+    daysBetween = (weeksBetween - math.floor(weeksBetween)) * 7
+    hoursBetween = (daysBetween - math.floor(daysBetween)) * 24
+    minutesBetwenn = (hoursBetween - math.floor(hoursBetween)) * 60
+    [math.floor(weeksBetween), math.floor(daysBetween), math.floor(hoursBetween), math.floor(minutesBetwenn)]
+
+// Plot Stat
+
+showStat() =>
+    var tbl = table.new(position.top_right, 4, 5, border_color = color.black, border_width = 1)
+    table.cell(tbl, 0, 0, "Metrics",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 0, "Expected", bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 2, 0, "Actual", bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 3, 0, "Status", bgcolor = color.gray, text_color = color.white, width = 8, height = 8)
+    
+    [weeks, days, hours, minutes] = calculateTimeDiff(Start, End)
+    weeklyExpectedProfit = ExpectedProfit / 52
+    expectedProfit = weeklyExpectedProfit*weeks/100.0 * maxopen
+    netexpected = str.replace(str.format("{0,number,currency}", expectedProfit), "$",  "", 0)
+    net = str.replace(str.format("{0,number,currency}", profitequity), "$",  "", 0)
+    profitableStrategy = profitequity > expectedProfit 
+    table.cell(tbl, 0, 1, "Net. Profit", bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 1, netexpected, bgcolor = color.white, width = 15, height = 8)
+    table.cell(tbl, 2, 1, net, bgcolor = color.white, width = 15, height = 8)
+    table.cell(tbl, 3, 1, str.tostring(profitequity/expectedProfit, '#.##')+"x", bgcolor = profitableStrategy ? color.green : color.red, width = 8, height = 8)
+
+    capitalEffective = strategy.initial_capital > maxopen
+    capital = str.replace(str.format("{0,number,currency}", strategy.initial_capital), "$",  "", 0)
+    usedcapital = str.replace(str.format("{0,number,currency}", maxopen), "$",  "", 0)
+    table.cell(tbl, 0, 2, "Capital",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 2, capital, bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 2, 2, usedcapital, bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 3, 2, str.tostring(100-((strategy.initial_capital-maxopen)*100/strategy.initial_capital), '#.##')+"%", bgcolor = capitalEffective ? color.green : color.red, width = 8, height = 8)
+
+    buyCountEffective = Pyramiding >= maxscale
+    table.cell(tbl, 0, 3, "Buy Count",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 3, str.tostring(Pyramiding), bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 2, 3, str.tostring(maxscale), bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 3, 3, str.tostring((1-(Pyramiding-maxscale)/Pyramiding)*100, '#.##')+"%", bgcolor = buyCountEffective ? color.green : color.red, width = 8, height = 8)
+
+    avgprofit = array.avg(listpnl)
+    avgProfitableStrategy = avgprofit > MinProfit
+    table.cell(tbl, 0, 4, "Average Profit",  bgcolor = color.gray, text_color = color.white, width = 15, height = 8)
+    table.cell(tbl, 1, 4, str.tostring(MinProfit)+"%", bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 2, 4, str.tostring(avgprofit, '#.##')+"%", bgcolor = color.white,   width = 15, height = 8)
+    table.cell(tbl, 3, 4, str.tostring((avgprofit/MinProfit), '#.##')+"x", bgcolor = avgProfitableStrategy ? color.green : color.red, width = 8, height = 8)
+
+if showPerformance
+    showStat()
