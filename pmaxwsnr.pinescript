@@ -1,5 +1,5 @@
 //@version=5
-strategy("Profit Maximizer with SnR [Michael]", shorttitle="PMaxwSnR", overlay=true, pyramiding = 100, initial_capital = 100000000.0)
+strategy("Profit Maximizer with SnR [Michael]", shorttitle="PMaxwSnR", overlay=true, pyramiding = 100, initial_capital = 10000000.0)
 
 src                 = input(close, title="Source")
 multiplier          = input.float(title="Multiplier", step=0.1, defval=3.0)
@@ -277,7 +277,8 @@ riskmultiplier = 1 - (float(RiskPercentage)/100)
 withinRange = time >= Start and time <= End
 haveEquity = strategy.equity > 0
 isCheap = prevbuy == 0 or close < prevbuy * riskmultiplier
-buyCondition = buySignalk and withinRange and haveEquity and isCheap and tradeAboveMA()
+buyConditionPMax = buySignalk and withinRange and haveEquity and isCheap and tradeAboveMA()
+buyConditionSnR = f_crossed_under() and withinRange and haveEquity and isCheap and tradeAboveMA()
 isProfitable = (strategy.equity > prevequity and pnl > MinProfit) or not RequireProfit
 sellConditionSnR = f_crossed_over() and isProfitable and SellOnResitance
 sellConditionPmax = sellSignallk and withinRange and haveEquity and isProfitable
@@ -305,7 +306,7 @@ calculateTradeAmt() =>
         qty += strategy.position_size
     qty
 
-if buyCondition
+if buyConditionPMax
     tradeamt = calculateTradeAmt()
     prevbuy := close
     buyamount = tradeamt*close
@@ -333,7 +334,7 @@ if sellConditionPmax
 if sellConditionSnR
     halfSize = math.floor((strategy.position_size / 2)/MinQty)*MinQty
     opensize = (nz(strategy.position_size)-halfSize)*strategy.position_avg_price
-    log.info("\n SELL PARTIAL pnl: {0} % \n current equity: {1} \n open size {2}", pnl, strategy.equity, opensize)
+    log.info("\n SELL PARTIAL pnl: {0} % \n current equity: {1} \n open size {2} \n avg price {3}", pnl, strategy.equity, opensize, strategy.position_avg_price)
     strategy.close(id = "buy", comment = "sell partial", qty=halfSize)
     prevequity := strategy.equity
     prevbuy := 0.0
@@ -392,8 +393,11 @@ showStat() =>
     table.cell(tbl, 3, 4, str.tostring((avgprofit/MinProfit), '#.##')+"x", bgcolor = avgProfitableStrategy ? color.green : color.red, width = 8, height = 8)
 
 if barstate.islast
-    psize = strategy.position_size * strategy.position_avg_price
-    cval = strategy.position_size * close
-    log.info("position size {0} \n current value {1} \n pnl {2}({3}%) \n avg price {4}", psize, cval, cval-psize, pnl, strategy.position_avg_price)
+    ap = nz(strategy.position_avg_price)
+    pz = nz(strategy.position_size)
+    psize = pz * ap
+    cval = pz * close
+    usedcapital = str.replace(str.format("{0,number,currency}", maxopen), "$",  "", 0)
+    log.info("position size {0} \n current value {1} \n pnl {2}({3}%) \n avg price {4} \n capital used {5}", psize, cval, cval-psize, pnl, ap, usedcapital)
     if showPerformance
         showStat()
