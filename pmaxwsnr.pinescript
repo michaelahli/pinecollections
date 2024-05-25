@@ -12,13 +12,14 @@ ScaleIn             = input.bool(defval = false, title="Scale In Pyramid")
 Start               = input.time(defval = timestamp("01 Jan 2020 00:00 +0000"), title = "Start Time")
 End                 = input.time(defval = timestamp("01 Jan 2045 00:00 +0000"), title = "End Time")
 AboveMA             = input.int(defval = 200, title = "Only Trade Above MA", minval = 0)
-StartMin            = input.bool(defval = false, title="Spend Minimum")
 Pyramiding          = input.int(defval = 1, title = "Pyramiding Count", minval = 1)
 MinQty              = input.float(defval = 100, title = "Minimum Purchase Quantity", minval = 1)
+StartMin            = input.bool(defval = false, title="Spend Minimum Purchase Quantity")
 MinProfit           = input.float(defval = 1, title="Minimum Profit Percentage (%)")
 ExpectedProfit      = input.float(defval = 12, title="Expected YoY Profit Percentage (%)")
 RequireProfit       = input.bool(defval = true, title="Require Profit")
 SellOnResitance     = input.bool(defval = true, title="Sell on Resistance")
+MinimizeSpending    = input.bool(defval = false, title="Minimize Spending")
 
 showsupport         = input.bool(title="Show Moving Average", defval=true)
 showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
@@ -31,7 +32,6 @@ maxnumpp            = input.int(defval=20, title=' Maximum Number of Pivot', min
 ChannelW            = input.int(defval=10, title='Maximum Channel Width %', minval=1, group='Setup')
 maxnumsr            = input.int(defval=5, title=' Maximum Number of S/R', minval=1, maxval=10, group='Setup')
 min_strength        = input.int(defval=2, title=' Minimum Strength', minval=1, maxval=10, group='Setup')
-riskPercentage      = input.float(defval = 20, title = "Risk Percentage (%)", minval = 0)
 labelloc            = input.int(defval=20, title='Label Location', group='Colors', tooltip='Positive numbers reference future bars, negative numbers reference histical bars')
 linestyle           = input.string(defval='Dashed', title='Line Style', options=['Solid', 'Dotted', 'Dashed'], group='Colors')
 linewidth           = input.int(defval=2, title='Line Width', minval=1, maxval=4, group='Colors')
@@ -299,7 +299,11 @@ countScale(avgprice, cnt, max) =>
         [ncnt, nmax]
 
 calculateTradeAmt() =>
-    qty =  math.floor((strategy.initial_capital/mmdivider)/(close*MinQty))*MinQty
+    capital = strategy.initial_capital
+    owned = strategy.position_size * strategy.position_avg_price
+    if MinimizeSpending and not na(owned) and nz(owned) < capital
+        capital := nz(owned)
+    qty =  math.floor((capital/mmdivider)/(close*MinQty))*MinQty
     if StartMin
         qty := MinQty
     if strategy.position_size != 0 and isScaledIn
