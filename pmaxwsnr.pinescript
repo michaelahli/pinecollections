@@ -20,7 +20,7 @@ ExpectedProfit      = input.float(defval = 12, title="Expected YoY Profit Percen
 RequireProfit       = input.bool(defval = true, title="Require Profit")
 SellOnResitance     = input.bool(defval = true, title="Sell on Resistance")
 MinimizeSpending    = input.bool(defval = false, title="Minimize Spending")
-BuyOnWeakness       = input.bool(defval = true, title="Buy On Weakness")
+BuyOnWeakness       = input.bool(defval = false, title="Buy On Weakness")
 
 showsupport         = input.bool(title="Show Moving Average", defval=true)
 showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
