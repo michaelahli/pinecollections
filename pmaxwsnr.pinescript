@@ -301,8 +301,11 @@ countScale(avgprice, cnt, max) =>
 calculateTradeAmt() =>
     capital = strategy.initial_capital
     owned = strategy.position_size * strategy.position_avg_price
-    if MinimizeSpending and not na(owned) and nz(owned) < capital
-        capital := nz(owned)
+    if MinimizeSpending 
+        if not na(owned) and nz(owned) < capital
+            capital := nz(owned)
+        if not na(strategy.position_avg_price) and close > nz(strategy.position_avg_price)
+            capital := capital / 4
     qty =  math.floor((capital/mmdivider)/(close*MinQty))*MinQty
     if StartMin
         qty := MinQty
@@ -310,7 +313,7 @@ calculateTradeAmt() =>
         qty += strategy.position_size
     qty
 
-if buyConditionPMax and not sellConditionPmax and not sellConditionSnR
+if (buyConditionPMax) and not sellConditionPmax and not sellConditionSnR
     tradeamt = calculateTradeAmt()
     prevbuy := close
     buyamount = tradeamt*close
