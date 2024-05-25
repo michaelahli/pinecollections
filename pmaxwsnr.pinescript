@@ -15,12 +15,12 @@ AboveMA             = input.int(defval = 200, title = "Only Trade Above MA", min
 Pyramiding          = input.int(defval = 1, title = "Pyramiding Count", minval = 1)
 MinQty              = input.float(defval = 100, title = "Minimum Purchase Quantity", minval = 1)
 StartMin            = input.bool(defval = false, title="Spend Minimum Purchase Quantity")
-MinProfit           = input.float(defval = 1, title="Minimum Profit Percentage (%)")
+MinProfit           = input.float(defval = 3, title="Minimum Profit Percentage (%)")
 ExpectedProfit      = input.float(defval = 12, title="Expected YoY Profit Percentage (%)")
 RequireProfit       = input.bool(defval = true, title="Require Profit")
 SellOnResitance     = input.bool(defval = true, title="Sell on Resistance")
 MinimizeSpending    = input.bool(defval = false, title="Minimize Spending")
-BuyOnWeakness       = input.bool(defval = false, title="Buy On Weakness")
+BuyOnWeakness       = input.bool(defval = true, title="Buy On Weakness")
 
 showsupport         = input.bool(title="Show Moving Average", defval=true)
 showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
@@ -280,8 +280,9 @@ haveEquity = strategy.equity > 0
 isCheap = prevbuy == 0 or close < prevbuy * riskmultiplier
 buyConditionPMax = buySignalk and withinRange and haveEquity and isCheap and tradeAboveMA()
 buyConditionSnR = f_crossed_under() and withinRange and haveEquity and isCheap and tradeAboveMA() and BuyOnWeakness
-isProfitable = (strategy.equity > prevequity and pnl > MinProfit) or not RequireProfit
-sellConditionSnR = f_crossed_over() and isProfitable and SellOnResitance
+isProfitable = (pnl > MinProfit) or not RequireProfit
+surplusEquity = strategy.equity > prevequity
+sellConditionSnR = f_crossed_over() and isProfitable and SellOnResitance and surplusEquity
 sellConditionPmax = sellSignallk and withinRange and haveEquity and isProfitable
 isScaledIn = ScaleIn == true
 
