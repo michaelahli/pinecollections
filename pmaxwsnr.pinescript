@@ -310,7 +310,7 @@ calculateTradeAmt() =>
         qty += strategy.position_size
     qty
 
-if buyConditionPMax
+if buyConditionPMax and not sellConditionPmax and not sellConditionSnR
     tradeamt = calculateTradeAmt()
     prevbuy := close
     buyamount = tradeamt*close
@@ -327,7 +327,7 @@ if buyConditionPMax
     if opensize > maxopen
         maxopen := opensize
 
-if sellConditionPmax
+if sellConditionPmax or barstate.islast
     log.info("\n SELL ALL pnl: {0} % \n current equity: {1}", pnl, strategy.equity)
     strategy.close_all(comment = "sell all")
     prevequity := strategy.equity
