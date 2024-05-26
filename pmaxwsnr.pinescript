@@ -303,7 +303,8 @@ isProfitable = (pnl > MinProfit) or not RequireProfit
 surplusEquity = strategy.equity > prevequity
 sellConditionSnR = onResist and isProfitable and SellOnResitance and surplusEquity
 sellConditionPmax = sellSignallk and withinRange and haveEquity and isProfitable
-sellCutloss = strongDowntrend and not isAboveMA and gappmax < 0 and UseCutLoss
+sellCutlossMA = AboveMA > 0 ? strongDowntrend and not isAboveMA and gappmax < 0 and UseCutLoss and withinRange and haveEquity  : strongDowntrend and gappmax < 0 and UseCutLoss and withinRange and haveEquity 
+sellCutlossPmax = sellSignallk and UseCutLoss and withinRange and haveEquity 
 isScaledIn = ScaleIn == true
 
 mmdivider = float(Pyramiding*(Pyramiding+1) / 2)
@@ -362,7 +363,7 @@ if sellConditionPmax or barstate.islast
     profitequity := prevequity - strategy.initial_capital
     array.push(listpnl, pnl)
 
-if sellCutloss
+if sellCutlossPmax
     log.info("\n CUTLOSS pnl: {0} % \n current equity: {1}", pnl, strategy.equity)
     strategy.close_all(comment = "cutloss")
     prevequity := strategy.equity
