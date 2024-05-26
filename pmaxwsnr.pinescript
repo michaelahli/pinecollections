@@ -21,6 +21,7 @@ RequireProfit       = input.bool(defval = true, title="Require Profit")
 SellOnResitance     = input.bool(defval = true, title="Sell on Resistance")
 MinimizeSpending    = input.bool(defval = false, title="Minimize Spending")
 BuyOnWeakness       = input.bool(defval = false, title="Buy On Weakness")
+UseCutLoss          = input.bool(defval = false, title="Use Cut Loss")
 
 showsupport         = input.bool(title="Show Moving Average", defval=true)
 showsignalsk        = input.bool(title="Show Crossing Signals", defval=false)
@@ -248,6 +249,7 @@ buySignalk = ta.crossover(calculatedMA, pmax)
 plotshape(buySignalk and showsignalsk ? pmax*0.995 : na, title="Buy", text="Buy", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
 sellSignallk = ta.crossunder(calculatedMA, pmax)
 plotshape(sellSignallk and showsignalsk ? pmax*1.005 : na, title="Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+gappmax = calculatedMA - pmax
 
 pALL=plot(pmax, color=color.red, linewidth=2, title="Profit Maximizer")
 mPlot = plot(ohlc4, title="", style=plot.style_circles, display=display.none)
@@ -301,7 +303,7 @@ isProfitable = (pnl > MinProfit) or not RequireProfit
 surplusEquity = strategy.equity > prevequity
 sellConditionSnR = onResist and isProfitable and SellOnResitance and surplusEquity
 sellConditionPmax = sellSignallk and withinRange and haveEquity and isProfitable
-sellCutloss = strongDowntrend and not isAboveMA
+sellCutloss = strongDowntrend and not isAboveMA and gappmax < 0 and UseCutLoss
 isScaledIn = ScaleIn == true
 
 mmdivider = float(Pyramiding*(Pyramiding+1) / 2)
@@ -352,7 +354,8 @@ if (buyConditionPMax or buyConditionSnR) and not sellConditionPmax and not sellC
         maxopen := opensize
 
 if sellConditionPmax or barstate.islast 
-    log.info("\n SELL ALL pnl: {0} % \n current equity: {1}", pnl, strategy.equity)
+    snd = strategy.equity - strategy.initial_capital
+    log.info("\n SELL ALL pnl: {0} % \n current equity: {1} \n capital surplus/deficit: {2}", pnl, strategy.equity, str.tostring(snd))
     strategy.close_all(comment = "sell all")
     prevequity := strategy.equity
     prevbuy := 0.0
@@ -434,6 +437,6 @@ if barstate.islast
     psize = pz * ap
     cval = pz * close
     usedcapital = str.replace(str.format("{0,number,currency}", maxopen), "$",  "", 0)
-    log.info("position size {0} \n current value {1} \n pnl {2}({3}%) \n avg price {4} \n capital used {5}", psize, cval, cval-psize, pnl, ap, usedcapital)
+    log.info("position size {0} \n current value {1} \n pnl {2}({3}%) \n avg price {4} \n capital used {5}", psize, cval, cval-psize, pnl, ap, str.tostring(maxopen))
     if showPerformance
         showStat()
