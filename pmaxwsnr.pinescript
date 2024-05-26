@@ -266,24 +266,42 @@ varip scalecount = 0
 varip maxscale = 1
 varip profitequity = 0.0
 varip listpnl = array.new_float()
+varip listgapsma = array.new_float()
+
+array.push(listgapsma, math.abs(close - out))
+
+isStrongDowntrend() =>
+    isd = false
+    if not na(strategy.position_avg_price)
+        gapsmaavg = array.avg(listgapsma)
+        gapsma = out - strategy.position_avg_price
+        if gapsma < 0 and math.abs(gapsma) > gapsmaavg
+            isd := true
+    isd
 
 tradeAboveMA() =>
+    tama = true
     if AboveMA > 0 
-        close > ta.sma(close, AboveMA)
-    else
-        true
+        tama := close > ta.sma(close, AboveMA)
+    tama
+    
+isAboveMA = tradeAboveMA()
+onSupport = f_crossed_under()
+onResist = f_crossed_over()
+strongDowntrend = isStrongDowntrend()
 
 pnl = (1-(strategy.position_avg_price/close))*100
 riskmultiplier = 1 - (float(RiskPercentage)/100)
 withinRange = time >= Start and time <= End
 haveEquity = strategy.equity > 0
 isCheap = prevbuy == 0 or close < prevbuy * riskmultiplier
-buyConditionPMax = buySignalk and withinRange and haveEquity and isCheap and tradeAboveMA()
-buyConditionSnR = f_crossed_under() and withinRange and haveEquity and isCheap and tradeAboveMA() and BuyOnWeakness
+buyConditionPMax = buySignalk and withinRange and haveEquity and isCheap and isAboveMA
+buyConditionSnR = onSupport and withinRange and haveEquity and isCheap and isAboveMA and BuyOnWeakness
 isProfitable = (pnl > MinProfit) or not RequireProfit
 surplusEquity = strategy.equity > prevequity
-sellConditionSnR = f_crossed_over() and isProfitable and SellOnResitance and surplusEquity
+sellConditionSnR = onResist and isProfitable and SellOnResitance and surplusEquity
 sellConditionPmax = sellSignallk and withinRange and haveEquity and isProfitable
+sellCutloss = strongDowntrend and not isAboveMA
 isScaledIn = ScaleIn == true
 
 mmdivider = float(Pyramiding*(Pyramiding+1) / 2)
@@ -315,6 +333,7 @@ calculateTradeAmt() =>
         qty += strategy.position_size
     qty
 
+
 if (buyConditionPMax or buyConditionSnR) and not sellConditionPmax and not sellConditionSnR
     tradeamt = calculateTradeAmt()
     prevbuy := close
@@ -332,9 +351,17 @@ if (buyConditionPMax or buyConditionSnR) and not sellConditionPmax and not sellC
     if opensize > maxopen
         maxopen := opensize
 
-if sellConditionPmax or barstate.islast
+if sellConditionPmax or barstate.islast 
     log.info("\n SELL ALL pnl: {0} % \n current equity: {1}", pnl, strategy.equity)
     strategy.close_all(comment = "sell all")
+    prevequity := strategy.equity
+    prevbuy := 0.0
+    profitequity := prevequity - strategy.initial_capital
+    array.push(listpnl, pnl)
+
+if sellCutloss
+    log.info("\n CUTLOSS pnl: {0} % \n current equity: {1}", pnl, strategy.equity)
+    strategy.close_all(comment = "cutloss")
     prevequity := strategy.equity
     prevbuy := 0.0
     profitequity := prevequity - strategy.initial_capital
