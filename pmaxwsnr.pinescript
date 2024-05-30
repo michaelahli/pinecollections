@@ -297,12 +297,15 @@ pnl = (1-(strategy.position_avg_price/close))*100
 riskmultiplier = 1 - (float(RiskPercentage)/100)
 withinRange = time >= Start and time <= End
 haveEquity = strategy.equity > 0
+haveStock = not na(strategy.position_avg_price)
 isCheap = prevbuy == 0 or close < prevbuy * riskmultiplier
-buyConditionBreakout = gappmax > 0 and isAboveMA and withinRange and haveEquity and isCheap and isAboveMA and strongUptrend
-buyConditionPMax = buySignalk and withinRange and haveEquity and isCheap and isAboveMA and strongUptrend
-buyConditionSnR = onSupport and withinRange and haveEquity and isCheap and isAboveMA and BuyOnWeakness
 isProfitable = (pnl > MinProfit) or not RequireProfit
 surplusEquity = strategy.equity > prevequity
+
+buyConditionBreakout = gappmax > 0 and isAboveMA and withinRange and haveEquity and isCheap and isAboveMA and strongUptrend
+buyConditionPMax = buySignalk and withinRange and haveEquity and isCheap and isAboveMA and strongUptrend
+buyConditionSnR = onSupport and withinRange and haveEquity and isCheap and isAboveMA and BuyOnWeakness and haveStock and not surplusEquity
+
 sellConditionSnR = onResist and isProfitable and SellOnResitance and surplusEquity
 sellConditionPmax = sellSignallk and withinRange and haveEquity and isProfitable
 sellCutlossMA = AboveMA > 0 ? strongDowntrend and not isAboveMA and gappmax < 0 and UseCutLoss and withinRange and haveEquity  : strongDowntrend and gappmax < 0 and UseCutLoss and withinRange and haveEquity 
